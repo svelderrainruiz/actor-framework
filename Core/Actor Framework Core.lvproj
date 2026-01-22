@@ -38,9 +38,11 @@
 			<Item Name="Test Launch For Nested Actor Without Caller.vi" Type="VI" URL="../ActorFramework/Testing Support/Test Launch For Nested Actor Without Caller.vi"/>
 		</Item>
 		<Item Name="Tests" Type="Folder">
+			<Item Name="Depercated Caraya" Type="Folder">
+				<Item Name="Launch Root Actor_Actor_Generates Actor Traces.vi" Type="VI" URL="../Testing/Tests/Launch Root Actor_Actor_Generates Actor Traces.vi"/>
+				<Item Name="Stop Autostop Nested Actors_Stops Nested Actors.vi" Type="VI" URL="../Testing/Tests/Stop Autostop Nested Actors_Stops Nested Actors.vi"/>
+			</Item>
 			<Item Name="AF Test.lvclass" Type="LVClass" URL="../Testing/Tests/LUnit Tests/AF Test/AF Test.lvclass"/>
-			<Item Name="Launch Root Actor_Actor_Generates Actor Traces.vi" Type="VI" URL="../Testing/Tests/Launch Root Actor_Actor_Generates Actor Traces.vi"/>
-			<Item Name="Stop Autostop Nested Actors_Stops Nested Actors.vi" Type="VI" URL="../Testing/Tests/Stop Autostop Nested Actors_Stops Nested Actors.vi"/>
 		</Item>
 		<Item Name="Actor Framework.lvlib" Type="Library" URL="../ActorFramework/Actor Framework.lvlib"/>
 		<Item Name="AF Debug.lvlib" Type="Library" URL="../AFDebug/AF Debug.lvlib"/>
