@@ -1,5 +1,4 @@
 [![Discord](https://img.shields.io/discord/1319915996789739540?label=chat&logo=discord&style=flat)](https://discord.gg/q4d3ggrFVA)
-![Coding hours](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ni/actor-framework/metrics/badge.json)
 
 # 🧩 Actor Framework
 
@@ -31,7 +30,7 @@
 Actor Framework (AF) is NI’s reference implementation of the Actor Model in LabVIEW. It enables large-scale, message-oriented applications with asynchronous actors that can be launched, monitored, and shut down predictably. This repo is the **canonical upstream** for AF beginning with v2.x and is maintained under the MIT license.
 
 - **Primary LabVIEW target:** 2020 SP1 or later (32- & 64-bit)
-- **Package format:** VIPM (`.vip`) built by GitHub Actions for every merge to `main` and tagged release.
+- **Package format:** VIPM (`.vip`) published on the GitHub Releases page.
 
 ---
 
@@ -60,16 +59,15 @@ External contributors must sign NI’s CLA once per GitHub account. A bot will p
    • Comment on any issue labeled [Workflow: Open to Contribution](https://github.com/ni/actor-framework/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22Workflow%3A%20Open%20to%20contribution%22).\
    • A maintainer assigns you and NI creates the feature branch.  
 3. **First-Time Setup**\
-   • Follow the steps in [`docs/self-hosted-runner.md`](docs/self-hosted-runner.md) *(in progress)* to register a self-hosted runner if you need one.\
    • Fork the repository to your GitHub account.  
 4. **Feature Development**\
    • Clone (or sync) your fork.\
    • Implement changes and push to **`develop`** in your fork.  
 5. **Build**\
-   • CI builds a `.vip` and posts it as a **pre-release** on *your fork’s* Releases page.  
+   • Build a `.vip` package for testing.  
 6. **Test**\
-   • Install the pre-release package and verify the issue is resolved.\
-   • *Note: the company name of your package will show the fork’s owner instead of “NI”.*  
+   • Install the package and verify the issue is resolved.\
+   • *Note: the company name of your package may show the fork’s owner instead of “NI”.*  
 7. **Pull Request**\
    • Open a PR targeting the feature branch in the upstream repo.\
    • Sign the CLA if the contribution is intended to ship with LabVIEW.\
