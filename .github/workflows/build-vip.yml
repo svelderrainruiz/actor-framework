@@ -1,0 +1,125 @@
+name: Build VI Package (AF 2020)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  build-vip:
+    runs-on: [self-hosted, actorframework]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: version
+        uses: ./.github/actions/compute-version
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate release notes
+        uses: ./.github/actions/generate-release-notes
+        with:
+          output_path: builds/release_notes.md
+
+      - name: Generate display information JSON
+        id: display-info
+        shell: pwsh
+        env:
+          RELEASE_NOTES_PATH: ${{ github.workspace }}/builds/release_notes.md
+          REPO_NAME: ${{ github.event.repository.name }}
+          REPO_DESCRIPTION: ${{ github.event.repository.description }}
+          REPO_URL: ${{ github.event.repository.html_url }}
+          COMPANY: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          $releaseNotesPath = $Env:RELEASE_NOTES_PATH
+          if (-not (Test-Path $releaseNotesPath)) {
+            throw "Release notes not found at $releaseNotesPath"
+          }
+          $releaseNotes = Get-Content -Raw -Path $releaseNotesPath
+
+          $productName = if ([string]::IsNullOrWhiteSpace($Env:REPO_NAME)) {
+            $Env:REPOSITORY
+          } else {
+            $Env:REPO_NAME
+          }
+
+          $description = if ([string]::IsNullOrWhiteSpace($Env:REPO_DESCRIPTION)) {
+            "$($Env:REPO_NAME) VI Package build for $($Env:REPOSITORY)."
+          } else {
+            $Env:REPO_DESCRIPTION
+          }
+
+          $info = @{
+            "Package Version" = @{
+              "major" = ${{ steps.version.outputs.MAJOR }}
+              "minor" = ${{ steps.version.outputs.MINOR }}
+              "patch" = ${{ steps.version.outputs.PATCH }}
+              "build" = ${{ steps.version.outputs.BUILD }}
+            }
+            "Product Name" = $productName
+            "Company Name" = $Env:COMPANY
+            "Author Name (Person or Company)" = $Env:REPOSITORY
+            "Product Homepage (URL)" = if ([string]::IsNullOrWhiteSpace($Env:REPO_URL)) {
+              "https://github.com/$($Env:REPOSITORY)"
+            } else {
+              $Env:REPO_URL
+            }
+            "Legal Copyright" = "© $(Get-Date -Format yyyy) $($Env:COMPANY)"
+            "License Agreement Name" = "LICENSE.txt"
+            "Product Description Summary" = $description
+            "Product Description" = $description
+            "Release Notes - Change Log" = $releaseNotes
+          }
+
+          $json = $info | ConvertTo-Json -Depth 5 -Compress
+          "json=$json" >> $Env:GITHUB_OUTPUT
+
+      - name: Update VIPB metadata
+        uses: ./.github/actions/modify-vipb-display-info
+        with:
+          supported_bitness: 64
+          relative_path: ${{ github.workspace }}
+          vipb_path: "Core/Actor Framework 2024 for 2020.vipb"
+          minimum_supported_lv_version: 2020
+          labview_minor_revision: "0"
+          major: ${{ steps.version.outputs.MAJOR }}
+          minor: ${{ steps.version.outputs.MINOR }}
+          patch: ${{ steps.version.outputs.PATCH }}
+          build: ${{ steps.version.outputs.BUILD }}
+          commit: ${{ github.sha }}
+          release_notes_file: ${{ github.workspace }}/builds/release_notes.md
+          display_information_json: ${{ steps.display-info.outputs.json }}
+
+      - name: Build VI Package
+        uses: ./.github/actions/build-vip
+        with:
+          supported_bitness: 64
+          relative_path: ${{ github.workspace }}
+          vipb_path: "Core/Actor Framework 2024 for 2020.vipb"
+          minimum_supported_lv_version: 2020
+          labview_minor_revision: "0"
+          major: ${{ steps.version.outputs.MAJOR }}
+          minor: ${{ steps.version.outputs.MINOR }}
+          patch: ${{ steps.version.outputs.PATCH }}
+          build: ${{ steps.version.outputs.BUILD }}
+          commit: ${{ github.sha }}
+          release_notes_file: ${{ github.workspace }}/builds/release_notes.md
+          display_information_json: ${{ steps.display-info.outputs.json }}
+
+      - name: Close LabVIEW
+        if: always()
+        uses: ./.github/actions/close-labview
+        with:
+          minimum_supported_lv_version: 2020
+          supported_bitness: 64
