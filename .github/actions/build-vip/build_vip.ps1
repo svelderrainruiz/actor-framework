@@ -1,0 +1,264 @@
+<#
+.SYNOPSIS
+    Updates a VIPB file's display information and builds the VI package.
+
+.DESCRIPTION
+    Resolves paths, merges version details into DisplayInformation JSON, and
+    calls g-cli to modify the VIPB file and create the final VI package.
+
+.PARAMETER SupportedBitness
+    LabVIEW bitness for the build ("32" or "64").
+
+.PARAMETER RelativePath
+    Path to the repository root.
+
+.PARAMETER VIPBPath
+    Relative path to the VIPB file to update.
+
+.PARAMETER MinimumSupportedLVVersion
+    Minimum LabVIEW version supported by the package.
+
+.PARAMETER LabVIEWMinorRevision
+    Minor revision number of LabVIEW (0 or 3).
+
+.PARAMETER Major
+    Major version component for the package.
+
+.PARAMETER Minor
+    Minor version component for the package.
+
+.PARAMETER Patch
+    Patch version component for the package.
+
+.PARAMETER Build
+    Build number component for the package.
+
+.PARAMETER Commit
+    Commit identifier embedded in the package metadata.
+
+.PARAMETER ReleaseNotesFile
+    Path to a release notes file injected into the build.
+
+.PARAMETER KillLabVIEW
+    When true, g-cli will force-close the LabVIEW instance it launched.
+
+.PARAMETER DisplayInformationJSON
+    JSON string representing the VIPB display information to update.
+
+.EXAMPLE
+    .\build_vip.ps1 -SupportedBitness "64" -RelativePath "C:\repo" -VIPBPath "Tooling\deployment\NI Icon editor.vipb" -MinimumSupportedLVVersion 2021 -LabVIEWMinorRevision 3 -Major 1 -Minor 0 -Patch 0 -Build 2 -Commit "abcd123" -ReleaseNotesFile "Tooling\deployment\release_notes.md" -DisplayInformationJSON '{"Package Version":{"major":1,"minor":0,"patch":0,"build":2}}'
+#>
+
+param (
+    [string]$SupportedBitness,
+    [string]$RelativePath,
+    [string]$VIPBPath,
+
+    [int]$MinimumSupportedLVVersion,
+
+    [ValidateSet("0","3")]
+    [string]$LabVIEWMinorRevision = "0",
+
+    [int]$Major,
+    [int]$Minor,
+    [int]$Patch,
+    [int]$Build,
+    [string]$Commit,
+    [string]$ReleaseNotesFile,
+
+    [int]$VipmTimeoutSeconds = 300,
+    [bool]$KillLabVIEW = $false,
+
+    [Parameter(Mandatory=$true)]
+    [string]$DisplayInformationJSON
+)
+
+# 1) Resolve paths
+try {
+    $ResolvedRelativePath = Resolve-Path -Path $RelativePath -ErrorAction Stop
+    $ResolvedVIPBPath = Join-Path -Path $ResolvedRelativePath -ChildPath $VIPBPath -ErrorAction Stop
+}
+catch {
+    $errorObject = [PSCustomObject]@{
+        error      = "Error resolving paths. Ensure RelativePath and VIPBPath are valid."
+        exception  = $_.Exception.Message
+        stackTrace = $_.Exception.StackTrace
+    }
+    $errorObject | ConvertTo-Json -Depth 10
+    exit 1
+}
+
+# 2) Create release notes if needed and resolve the paths
+if (-not (Test-Path $ReleaseNotesFile)) {
+    Write-Host "Release notes file '$ReleaseNotesFile' does not exist. Creating it..."
+    New-Item -ItemType File -Path $ReleaseNotesFile -Force | Out-Null
+}
+
+try {
+    $ResolvedReleaseNotesFile = Resolve-Path -Path $ReleaseNotesFile -ErrorAction Stop
+}
+catch {
+    $errorObject = [PSCustomObject]@{
+        error      = "Error resolving ReleaseNotesFile. Ensure the path exists and is accessible."
+        exception  = $_.Exception.Message
+        stackTrace = $_.Exception.StackTrace
+    }
+    $errorObject | ConvertTo-Json -Depth 10
+    exit 1
+}
+
+# 3a) Ensure build log directory exists for troubleshooting
+$LogDirectory = Join-Path -Path $ResolvedRelativePath -ChildPath "builds/logs"
+New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null
+
+# 3b) Resolve g-cli executable path
+function Resolve-GCliExecutable {
+    param([string]$ExplicitPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        if (Test-Path $ExplicitPath) {
+            return (Resolve-Path -Path $ExplicitPath -ErrorAction Stop).Path
+        }
+        throw "GCLI_EXE was set to '$ExplicitPath' but the file does not exist."
+    }
+
+    $command = Get-Command g-cli -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Path
+    }
+
+    $candidates = @()
+    if ($Env:ProgramFiles) {
+        $candidates += Join-Path -Path $Env:ProgramFiles -ChildPath "G-CLI\\bin\\g-cli.exe"
+    }
+    $programFilesX86 = ${Env:ProgramFiles(x86)}
+    if ($programFilesX86) {
+        $candidates += Join-Path -Path $programFilesX86 -ChildPath "G-CLI\\bin\\g-cli.exe"
+    }
+    if ($Env:ProgramData) {
+        $candidates += Join-Path -Path $Env:ProgramData -ChildPath "chocolatey\\bin\\g-cli.exe"
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path -Path $candidate -ErrorAction Stop).Path
+        }
+    }
+
+    throw "g-cli.exe not found. Install G-CLI or add it to PATH."
+}
+
+try {
+    $gcliExe = Resolve-GCliExecutable -ExplicitPath $Env:GCLI_EXE
+    Write-Output "Using g-cli at $gcliExe"
+}
+catch {
+    $errorObject = [PSCustomObject]@{
+        error     = "Failed to locate g-cli.exe."
+        exception = $_.Exception.Message
+    }
+    $errorObject | ConvertTo-Json -Depth 10
+    exit 1
+}
+
+# 3) Calculate the LabVIEW version string
+$lvNumericMajor    = $MinimumSupportedLVVersion - 2000
+$lvNumericVersion  = "$($lvNumericMajor).$LabVIEWMinorRevision"
+if ($SupportedBitness -eq "64") {
+    $VIP_LVVersion_A = "$lvNumericVersion (64-bit)"
+}
+else {
+    $VIP_LVVersion_A = $lvNumericVersion
+}
+Write-Output "Building VI Package for LabVIEW $VIP_LVVersion_A..."
+
+# 4) Parse and update the DisplayInformationJSON
+try {
+    $jsonObj = $DisplayInformationJSON | ConvertFrom-Json
+}
+catch {
+    $errorObject = [PSCustomObject]@{
+        error      = "Failed to parse DisplayInformationJSON into valid JSON."
+        exception  = $_.Exception.Message
+        stackTrace = $_.Exception.StackTrace
+    }
+    $errorObject | ConvertTo-Json -Depth 10
+    exit 1
+}
+
+# If "Package Version" doesn't exist, create it as a subobject
+if (-not $jsonObj.'Package Version') {
+    $jsonObj | Add-Member -MemberType NoteProperty -Name 'Package Version' -Value ([PSCustomObject]@{
+        major = $Major
+        minor = $Minor
+        patch = $Patch
+        build = $Build
+    })
+}
+else {
+    # "Package Version" exists, so just overwrite its fields
+    $jsonObj.'Package Version'.major = $Major
+    $jsonObj.'Package Version'.minor = $Minor
+    $jsonObj.'Package Version'.patch = $Patch
+    $jsonObj.'Package Version'.build = $Build
+}
+
+# Re-convert to a JSON string with a comfortable nesting depth
+$UpdatedDisplayInformationJSON = $jsonObj | ConvertTo-Json -Depth 5
+
+# 5) Construct reusable g-cli arguments
+$gcliArgs = @(
+    "--lv-ver", $MinimumSupportedLVVersion.ToString(),
+    "--arch", $SupportedBitness,
+    "--connect-timeout", "120000"
+)
+
+if ($KillLabVIEW) {
+    $gcliArgs += @("--kill", "--kill-timeout", "20000")
+}
+
+$gcliArgs += @(
+    "--verbose",
+    "vipb", "--",
+    "--buildspec", $ResolvedVIPBPath,
+    "-v", "$Major.$Minor.$Patch.$Build",
+    "--release-notes", $ResolvedReleaseNotesFile,
+    "--timeout", $VipmTimeoutSeconds.ToString()
+)
+
+$prettyCommand = "$gcliExe " + ($gcliArgs -join ' ')
+Write-Output "Base build command:"
+Write-Output $prettyCommand
+
+# 6) Execute the build command and capture logs
+$logFile = Join-Path -Path $LogDirectory -ChildPath "gcli-build.log"
+Write-Host "Starting g-cli build. Logs: $logFile"
+
+try {
+    & $gcliExe @gcliArgs 2>&1 | Tee-Object -FilePath $logFile
+}
+catch {
+    $_ | Out-String | Tee-Object -FilePath $logFile -Append | Out-Null
+    $LASTEXITCODE = 1
+}
+
+if ($LASTEXITCODE -ne 0) {
+    if (Test-Path $logFile) {
+        Write-Host ("---- g-cli build log ({0}) ----" -f $logFile)
+        Get-Content -Path $logFile | ForEach-Object { Write-Host $_ }
+        Write-Host ("---- end g-cli build log ({0}) ----" -f $logFile)
+    }
+    else {
+        Write-Host ("g-cli build log not found at {0}" -f $logFile)
+    }
+
+    $errorObject = [PSCustomObject]@{
+        error    = "g-cli failed."
+        exitCode = $LASTEXITCODE
+        log      = $logFile
+    }
+    $errorObject | ConvertTo-Json -Depth 10
+    exit 1
+}
+
+Write-Host "Successfully built VI package: $ResolvedVIPBPath"
