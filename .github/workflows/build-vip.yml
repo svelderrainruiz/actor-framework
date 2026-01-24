@@ -1,4 +1,4 @@
-name: Build VI Package (AF 2020)
+name: Build Actor Framework Core
 
 on:
   workflow_dispatch:
