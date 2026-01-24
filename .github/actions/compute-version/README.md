@@ -1,9 +1,10 @@
 # Compute Version
 
-This composite action determines the semantic version for the build based on commit history, branch naming conventions and pull request labels. Pull requests should include exactly one of the labels `major`, `minor`, or `patch`. If no label is present, the action defaults to `patch`; conflicting labels still cause the action to fail.
+This composite action determines the semantic version for the build based on the `Library_Version` in a VIPB file, plus commit history for the build number. Prerelease suffixes are still derived from branch naming conventions.
 
 ## Inputs
 - `github_token`: GitHub token with repository access.
+- `vipb_path`: Path to the VIPB file used to derive `MAJOR`, `MINOR`, and `PATCH`.
 
 ## Outputs
 - `VERSION`: Full version string (e.g. `v1.2.3-build4`).
@@ -17,5 +18,6 @@ This composite action determines the semantic version for the build based on com
   uses: ./.github/actions/compute-version
   with:
     github_token: ${{ secrets.GITHUB_TOKEN }}
+    vipb_path: Core/Actor Framework 2024 for 2020.vipb
 - run: echo "Version is ${{ steps.version.outputs.VERSION }}"
 ```

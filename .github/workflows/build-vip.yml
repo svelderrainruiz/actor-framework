@@ -25,6 +25,7 @@ jobs:
         uses: ./.github/actions/compute-version
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          vipb_path: "Core/Actor Framework 2024 for 2020.vipb"
 
       - name: Generate release notes
         uses: ./.github/actions/generate-release-notes

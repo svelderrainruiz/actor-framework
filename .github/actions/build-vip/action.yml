@@ -84,7 +84,7 @@ runs:
           param([string]$Dir)
 
           if (-not (Test-Path $Dir)) {
-            Write-Host "No existing VI Package directory at '$Dir'. Creating it..."
+            Write-Host "No existing Builds directory at '$Dir'. Creating it..."
             New-Item -ItemType Directory -Path $Dir -Force | Out-Null
             return $Dir
           }
@@ -118,7 +118,7 @@ runs:
           return $Dir
         }
 
-        $vipDir = Join-Path -Path "${{ inputs.relative_path }}" -ChildPath "builds/VI Package"
+        $vipDir = Join-Path -Path "${{ inputs.relative_path }}" -ChildPath "Builds"
         $vipDir = Remove-ExistingVip -Dir $vipDir
 
         "vip_dir=$vipDir" | Out-File -FilePath $Env:GITHUB_OUTPUT -Append

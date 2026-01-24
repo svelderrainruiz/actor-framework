@@ -4,6 +4,9 @@ inputs:
   github_token:
     description: "GitHub token with repository access"
     required: true
+  vipb_path:
+    description: "Path to the VIPB file used to derive the base version"
+    required: true
 outputs:
   VERSION:
     description: "Full version string"
@@ -31,25 +34,6 @@ runs:
       with:
         fetch-depth: 0
 
-    - name: Determine bump type
-      id: bump_type
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ inputs.github_token }}
-        script: |
-          const allowed = ['major', 'minor', 'patch'];
-          let bump = 'none';
-          if (context.event_name === 'pull_request') {
-            const labels = context.payload.pull_request.labels.map(l => l.name.toLowerCase());
-            const found = labels.filter(l => allowed.includes(l));
-            if (found.length > 1) {
-              core.setFailed(`Conflicting release labels detected: ${found.join(', ')}`);
-              return;
-            }
-            bump = found[0] || 'patch';
-          }
-          core.setOutput('bump_type', bump);
-
     - name: Determine build number
       id: inc_build
       shell: pwsh
@@ -63,30 +47,32 @@ runs:
       id: next_version
       shell: pwsh
       env:
-        BUMP_TYPE:    ${{ steps.bump_type.outputs.bump_type }}
         BUILD_NUMBER: ${{ steps.inc_build.outputs.new_build_number }}
+        VIPB_PATH:    ${{ inputs.vipb_path }}
       run: |
-        $latestRaw = git describe --tags --abbrev=0 2>$null
-        if ($LASTEXITCODE -ne 0) {
-          Write-Host "No existing tags were found; defaulting to 0.0.0."
-          $latestRaw = ''
-          $global:LASTEXITCODE = 0
+        $vipbPath = $Env:VIPB_PATH
+        if ([string]::IsNullOrWhiteSpace($vipbPath)) {
+          throw "vipb_path input is required."
         }
-        if ([string]::IsNullOrWhiteSpace($latestRaw)) {
-          $maj=0; $min=1; $pat=0
+        if (-not (Test-Path -LiteralPath $vipbPath)) {
+          throw "VIPB file not found at $vipbPath"
         }
-        else {
-          $latest = $latestRaw.Trim().TrimStart('v') -replace '-build.*'
-          $parts = $latest.Split('.')
-          $maj = [int]$parts[0]
-          $min = if ($parts.Length -gt 1) { [int]$parts[1] } else { 0 }
-          $pat = if ($parts.Length -gt 2) { [int]$parts[2] } else { 0 }
+
+        [xml]$vipbXml = Get-Content -Raw -LiteralPath $vipbPath
+        $libraryVersion = $vipbXml.VI_Package_Builder_Settings.Library_General_Settings.Library_Version
+        if ([string]::IsNullOrWhiteSpace($libraryVersion)) {
+          throw "Library_Version not found in VIPB: $vipbPath"
         }
-        switch ($env:BUMP_TYPE) {
-          'major' { $maj++; $min=0; $pat=0 }
-          'minor' { $min++; $pat=0 }
-          'patch' { $pat++ }
+
+        $parts = $libraryVersion.Split('.')
+        if ($parts.Length -lt 3) {
+          throw "Unexpected Library_Version format '$libraryVersion' in $vipbPath"
         }
+
+        $maj = [int]$parts[0]
+        $min = [int]$parts[1]
+        $pat = [int]$parts[2]
+
         $branch = $Env:GITHUB_REF -replace '^refs/heads/',''
         $suffix = ''
         if ($branch -like 'release-alpha/*') { $suffix = "alpha.$($Env:BUILD_NUMBER)" }
