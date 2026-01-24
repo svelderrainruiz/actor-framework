@@ -1,0 +1,38 @@
+name: "Unit Tests (LV2020 32-bit)"
+description: "Runs unit_tests.ps1 to execute LabVIEW unit tests for LV2020 32-bit."
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Run unit_tests.ps1
+      shell: pwsh
+      run: |
+        & "${{ github.action_path }}/unit_tests.ps1" `
+          -RelativePath "${{ inputs.relative_path }}" `
+          -ProjectPath "${{ inputs.project_path }}" `
+          -ReportPath "${{ inputs.report_path }}" `
+          -MinimumSupportedLVVersion "${{ inputs.minimum_supported_lv_version }}" `
+          -SupportedBitness "${{ inputs.supported_bitness }}"
+inputs:
+  relative_path:
+    description: "Workspace root path."
+    required: true
+  project_path:
+    description: "Path to the LabVIEW project (.lvproj), relative to the repo root or absolute."
+    required: true
+  report_path:
+    description: "Path to the LUnit report output, relative to the repo root or absolute."
+    required: false
+    default: "builds\\logs\\UnitTestReport.xml"
+  minimum_supported_lv_version:
+    description: "LabVIEW major version."
+    required: false
+    default: "2020"
+  supported_bitness:
+    description: "32 or 64."
+    required: false
+    default: "32"

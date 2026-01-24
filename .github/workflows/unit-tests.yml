@@ -1,0 +1,38 @@
+name: Unit Tests (AF 2020)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  unit-tests:
+    runs-on: [self-hosted, actorframework]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run unit tests
+        uses: ./.github/actions/unit-tests
+        with:
+          relative_path: ${{ github.workspace }}
+          project_path: Core\Actor Framework Core.lvproj
+          report_path: builds\logs\UnitTestReport.xml
+          minimum_supported_lv_version: 2020
+          supported_bitness: 32
+
+      - name: Upload LUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunit-report
+          path: builds\logs\UnitTestReport.xml
+          if-no-files-found: warn
