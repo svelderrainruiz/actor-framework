@@ -39,6 +39,9 @@
 .PARAMETER ReleaseNotesFile
     Path to a release notes file injected into the build.
 
+.PARAMETER KillLabVIEW
+    When true, g-cli will force-close the LabVIEW instance it launched.
+
 .PARAMETER DisplayInformationJSON
     JSON string representing the VIPB display information to update.
 
@@ -62,6 +65,9 @@ param (
     [int]$Build,
     [string]$Commit,
     [string]$ReleaseNotesFile,
+
+    [int]$VipmTimeoutSeconds = 300,
+    [bool]$KillLabVIEW = $false,
 
     [Parameter(Mandatory=$true)]
     [string]$DisplayInformationJSON
@@ -104,6 +110,56 @@ catch {
 # 3a) Ensure build log directory exists for troubleshooting
 $LogDirectory = Join-Path -Path $ResolvedRelativePath -ChildPath "builds/logs"
 New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null
+
+# 3b) Resolve g-cli executable path
+function Resolve-GCliExecutable {
+    param([string]$ExplicitPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        if (Test-Path $ExplicitPath) {
+            return (Resolve-Path -Path $ExplicitPath -ErrorAction Stop).Path
+        }
+        throw "GCLI_EXE was set to '$ExplicitPath' but the file does not exist."
+    }
+
+    $command = Get-Command g-cli -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Path
+    }
+
+    $candidates = @()
+    if ($Env:ProgramFiles) {
+        $candidates += Join-Path -Path $Env:ProgramFiles -ChildPath "G-CLI\\bin\\g-cli.exe"
+    }
+    $programFilesX86 = ${Env:ProgramFiles(x86)}
+    if ($programFilesX86) {
+        $candidates += Join-Path -Path $programFilesX86 -ChildPath "G-CLI\\bin\\g-cli.exe"
+    }
+    if ($Env:ProgramData) {
+        $candidates += Join-Path -Path $Env:ProgramData -ChildPath "chocolatey\\bin\\g-cli.exe"
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path -Path $candidate -ErrorAction Stop).Path
+        }
+    }
+
+    throw "g-cli.exe not found. Install G-CLI or add it to PATH."
+}
+
+try {
+    $gcliExe = Resolve-GCliExecutable -ExplicitPath $Env:GCLI_EXE
+    Write-Output "Using g-cli at $gcliExe"
+}
+catch {
+    $errorObject = [PSCustomObject]@{
+        error     = "Failed to locate g-cli.exe."
+        exception = $_.Exception.Message
+    }
+    $errorObject | ConvertTo-Json -Depth 10
+    exit 1
+}
 
 # 3) Calculate the LabVIEW version string
 $lvNumericMajor    = $MinimumSupportedLVVersion - 2000
@@ -154,68 +210,52 @@ $UpdatedDisplayInformationJSON = $jsonObj | ConvertTo-Json -Depth 5
 $gcliArgs = @(
     "--lv-ver", $MinimumSupportedLVVersion.ToString(),
     "--arch", $SupportedBitness,
-    "--connect-timeout", "120000",
-    "--kill",
-    "--kill-timeout", "20000",
+    "--connect-timeout", "120000"
+)
+
+if ($KillLabVIEW) {
+    $gcliArgs += @("--kill", "--kill-timeout", "20000")
+}
+
+$gcliArgs += @(
     "--verbose",
     "vipb", "--",
     "--buildspec", $ResolvedVIPBPath,
     "-v", "$Major.$Minor.$Patch.$Build",
     "--release-notes", $ResolvedReleaseNotesFile,
-    "--timeout", "300"
+    "--timeout", $VipmTimeoutSeconds.ToString()
 )
 
-$prettyCommand = "g-cli " + ($gcliArgs -join ' ')
+$prettyCommand = "$gcliExe " + ($gcliArgs -join ' ')
 Write-Output "Base build command:"
 Write-Output $prettyCommand
 
-# 6) Execute the commands with retries and log capture
-$maxAttempts = 3
-$retryDelaySeconds = 15
-$success = $false
-$attemptLogs = @()
+# 6) Execute the build command and capture logs
+$logFile = Join-Path -Path $LogDirectory -ChildPath "gcli-build.log"
+Write-Host "Starting g-cli build. Logs: $logFile"
 
-for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-    $logFile = Join-Path -Path $LogDirectory -ChildPath ("gcli-build-attempt-{0}.log" -f $attempt)
-    $attemptLogs += $logFile
-    Write-Host "Starting g-cli build attempt $attempt of $maxAttempts. Logs: $logFile"
-
-    try {
-        & g-cli @gcliArgs 2>&1 | Tee-Object -FilePath $logFile
-    }
-    catch {
-        $_ | Out-String | Tee-Object -FilePath $logFile -Append | Out-Null
-        $LASTEXITCODE = 1
-    }
-
-    if ($LASTEXITCODE -eq 0) {
-        $success = $true
-        break
-    }
-
-    if ($attempt -lt $maxAttempts) {
-        Write-Warning "g-cli attempt $attempt failed with exit code $LASTEXITCODE. Retrying in $retryDelaySeconds seconds..."
-        Start-Sleep -Seconds $retryDelaySeconds
-    }
+try {
+    & $gcliExe @gcliArgs 2>&1 | Tee-Object -FilePath $logFile
+}
+catch {
+    $_ | Out-String | Tee-Object -FilePath $logFile -Append | Out-Null
+    $LASTEXITCODE = 1
 }
 
-if (-not $success) {
-    for ($i = 0; $i -lt $attemptLogs.Count; $i++) {
-        $log = $attemptLogs[$i]
-        if (Test-Path $log) {
-            Write-Host ("---- g-cli build log attempt {0} ({1}) ----" -f ($i + 1), $log)
-            Get-Content -Path $log | ForEach-Object { Write-Host $_ }
-            Write-Host ("---- end g-cli build log attempt {0} ----" -f ($i + 1))
-        }
-        else {
-            Write-Host ("g-cli build log for attempt {0} not found at {1}" -f ($i + 1), $log)
-        }
+if ($LASTEXITCODE -ne 0) {
+    if (Test-Path $logFile) {
+        Write-Host ("---- g-cli build log ({0}) ----" -f $logFile)
+        Get-Content -Path $logFile | ForEach-Object { Write-Host $_ }
+        Write-Host ("---- end g-cli build log ({0}) ----" -f $logFile)
+    }
+    else {
+        Write-Host ("g-cli build log not found at {0}" -f $logFile)
     }
 
     $errorObject = [PSCustomObject]@{
-        error      = "g-cli failed after $maxAttempts attempt(s)."
-        exitCode   = $LASTEXITCODE
-        logs       = $attemptLogs
+        error    = "g-cli failed."
+        exitCode = $LASTEXITCODE
+        log      = $logFile
     }
     $errorObject | ConvertTo-Json -Depth 10
     exit 1

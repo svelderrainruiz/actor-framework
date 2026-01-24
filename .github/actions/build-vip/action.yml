@@ -9,37 +9,70 @@ runs:
         fetch-depth: 0
         clean: false
 
-    - name: Pre-flight LabVIEW availability check
+    - name: Resolve g-cli executable
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
-        $logDir = Join-Path -Path "${{ inputs.relative_path }}" -ChildPath "builds/logs"
-        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-        $logFile = Join-Path -Path $logDir -ChildPath "gcli-preflight.log"
+        function Resolve-GCliExecutable {
+          param([string]$ExplicitPath)
 
-        $gcliArgs = @(
-          "--lv-ver", "${{ inputs.minimum_supported_lv_version }}",
-          "--arch", "${{ inputs.supported_bitness }}",
-          "--connect-timeout", "60000",
-          "--kill",
-          "--kill-timeout", "5000",
-          "--verbose",
-          "QuitLabVIEW"
-        )
-
-        Write-Host "Pre-flight command: g-cli $($gcliArgs -join ' ')"
-        & g-cli @gcliArgs 2>&1 | Tee-Object -FilePath $logFile | Out-Null
-
-        if ($LASTEXITCODE -ne 0) {
-          if (Test-Path $logFile) {
-            Write-Host "---- g-cli preflight log ($logFile) ----"
-            Get-Content -Path $logFile | ForEach-Object { Write-Host $_ }
-            Write-Host "---- end g-cli preflight log ----"
-          } else {
-            Write-Host "Pre-flight log file not found at $logFile."
+          if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+            if (Test-Path $ExplicitPath) {
+              return (Resolve-Path -Path $ExplicitPath -ErrorAction Stop).Path
+            }
+            throw "GCLI_EXE was set to '$ExplicitPath' but the file does not exist."
           }
-          Write-Error "Pre-flight g-cli check failed. Inspect $logFile for details."
-          exit $LASTEXITCODE
+
+          $command = Get-Command g-cli -ErrorAction SilentlyContinue
+          if ($command) {
+            return $command.Path
+          }
+
+          $candidates = @()
+          if ($Env:ProgramFiles) {
+            $candidates += Join-Path -Path $Env:ProgramFiles -ChildPath "G-CLI\\bin\\g-cli.exe"
+          }
+          $programFilesX86 = ${Env:ProgramFiles(x86)}
+          if ($programFilesX86) {
+            $candidates += Join-Path -Path $programFilesX86 -ChildPath "G-CLI\\bin\\g-cli.exe"
+          }
+          if ($Env:ProgramData) {
+            $candidates += Join-Path -Path $Env:ProgramData -ChildPath "chocolatey\\bin\\g-cli.exe"
+          }
+
+          foreach ($candidate in $candidates) {
+            if (Test-Path $candidate) {
+              return (Resolve-Path -Path $candidate -ErrorAction Stop).Path
+            }
+          }
+
+          throw "g-cli.exe not found. Install G-CLI or add it to PATH."
+        }
+
+        $gcliExe = Resolve-GCliExecutable -ExplicitPath $Env:GCLI_EXE
+        "GCLI_EXE=$gcliExe" | Out-File -FilePath $Env:GITHUB_ENV -Append
+        Write-Host "Using g-cli at $gcliExe"
+
+    - name: Verify LabVIEW install and G-CLI tool
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $version = "${{ inputs.minimum_supported_lv_version }}"
+        $bitness = "${{ inputs.supported_bitness }}"
+        $root = if ($bitness -eq "64") {
+          "C:\\Program Files\\National Instruments\\LabVIEW $version"
+        } else {
+          "C:\\Program Files (x86)\\National Instruments\\LabVIEW $version"
+        }
+
+        $labviewExe = Join-Path -Path $root -ChildPath "LabVIEW.exe"
+        if (-not (Test-Path -LiteralPath $labviewExe)) {
+          throw "LabVIEW.exe not found at $labviewExe"
+        }
+
+        $vipbTool = Join-Path -Path $root -ChildPath "vi.lib\\G CLI Tools\\vipb.vi"
+        if (-not (Test-Path -LiteralPath $vipbTool)) {
+          throw "VIPB Builder for G CLI not found at $vipbTool. Install it in LabVIEW $version ($bitness-bit)."
         }
 
     - name: Clean previous VI packages
@@ -97,6 +130,7 @@ runs:
           ${{ inputs.display_information_json }}
       run: |
         $displayInformationJson = $Env:DISPLAY_INFORMATION_JSON
+        $killLabVIEW = [System.Convert]::ToBoolean("${{ inputs.kill_labview }}")
 
         & "${{ github.action_path }}/build_vip.ps1" `
           -SupportedBitness ${{ inputs.supported_bitness }} `
@@ -110,6 +144,7 @@ runs:
           -Build ${{ inputs.build }} `
           -Commit "${{ inputs.commit }}" `
           -ReleaseNotesFile "${{ inputs.release_notes_file }}" `
+          -KillLabVIEW $killLabVIEW `
           -DisplayInformationJSON $displayInformationJson
 
     - name: Dump g-cli build logs on failure
@@ -123,9 +158,9 @@ runs:
           exit 0
         }
 
-        $logs = Get-ChildItem -Path $logDir -Filter "gcli-build-attempt-*.log" -File | Sort-Object Name
+        $logs = Get-ChildItem -Path $logDir -Filter "gcli-build*.log" -File | Sort-Object Name
         if (-not $logs) {
-          Write-Host "No g-cli build attempt logs found under $logDir."
+          Write-Host "No g-cli build logs found under $logDir."
           exit 0
         }
 
@@ -262,6 +297,10 @@ inputs:
   display_information_json:
     description: 'DisplayInformation JSON string'
     required: true
+  kill_labview:
+    description: 'If true, g-cli will force-close LabVIEW after the build'
+    required: false
+    default: 'false'
   fail_on_multiple_vips:
     description: 'If true, fail when multiple .vip files exist after the build step'
     required: false

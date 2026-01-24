@@ -88,7 +88,7 @@ jobs:
       - name: Update VIPB metadata
         uses: ./.github/actions/modify-vipb-display-info
         with:
-          supported_bitness: 64
+          supported_bitness: 32
           relative_path: ${{ github.workspace }}
           vipb_path: "Core/Actor Framework 2024 for 2020.vipb"
           minimum_supported_lv_version: 2020
@@ -104,7 +104,7 @@ jobs:
       - name: Build VI Package
         uses: ./.github/actions/build-vip
         with:
-          supported_bitness: 64
+          supported_bitness: 32
           relative_path: ${{ github.workspace }}
           vipb_path: "Core/Actor Framework 2024 for 2020.vipb"
           minimum_supported_lv_version: 2020
@@ -116,10 +116,4 @@ jobs:
           commit: ${{ github.sha }}
           release_notes_file: ${{ github.workspace }}/builds/release_notes.md
           display_information_json: ${{ steps.display-info.outputs.json }}
-
-      - name: Close LabVIEW
-        if: always()
-        uses: ./.github/actions/close-labview
-        with:
-          minimum_supported_lv_version: 2020
-          supported_bitness: 64
+          kill_labview: false

@@ -17,6 +17,7 @@ Runs **`build_vip.ps1`** to update a `.vipb` file's display info and build the V
 | `commit` | **Yes** | `abcdef` | Commit identifier. |
 | `release_notes_file` | **Yes** | `Tooling/deployment/release_notes.md` | Release notes file. |
 | `display_information_json` | **Yes** | `'{}'` | JSON for VIPB display information. |
+| `kill_labview` | No (defaults to `false`) | `false` | If true, g-cli will force-close LabVIEW after the build. |
 
 ## Quick-start
 ```yaml
@@ -33,6 +34,7 @@ Runs **`build_vip.ps1`** to update a `.vipb` file's display info and build the V
     commit: ${{ github.sha }}
     release_notes_file: Tooling/deployment/release_notes.md
     display_information_json: '{}'
+    kill_labview: false
 ```
 
 ## License
