@@ -1,4 +1,8 @@
 { "schemaVersion":1,
   "label":"Coding hours",
+<<<<<<< Updated upstream
   "message":"140h",
+=======
+  "message":"148h",
+>>>>>>> Stashed changes
   "color":"informational" }
